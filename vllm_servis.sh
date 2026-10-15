@@ -23,8 +23,10 @@
 #   ./vllm_servis.sh durum                    # hazır mı?
 #   ./vllm_servis.sh durdur
 #
-#   Sonra eğitim tarafında:
-#     python grpo_kos.py --vllm-server --adapter ckpt/sft_1000 --adim 200
+#   Servis OpenAI uyumludur (http://localhost:8000/v1). README'deki hız
+#   ölçümü bununla alındı. GRPO eğitimine BAĞLI DEĞİL: TRL'in server modu
+#   ağırlık eşitlemek için `trl vllm-serve` bekliyor, düz `vllm serve`
+#   yetmiyor. grpo_kos.py üretimi transformers ile yapar.
 
 set -uo pipefail
 BURASI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

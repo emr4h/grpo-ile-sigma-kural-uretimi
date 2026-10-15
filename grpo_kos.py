@@ -12,21 +12,22 @@ SIRA BOZULMAZ: SFT → GRPO
     yanlış ödülle saatlerce eğitim koşup sonunda modelin puanlayıcıyı
     kandırdığını görmek istemezsiniz.
 
-vLLM — PLANLANDI, KULLANILAMADI
+vLLM — COLOCATE BU İMAJDA ÇALIŞMIYOR
     Plan vLLM'i colocate modunda kullanmaktı; GRPO her adımda 8 cevap
-    ürettiği için üretim işin tamamı. Üç engel çıktı ve hiçbiri aşılamadı:
+    ürettiği için üretim işin tamamı. Eğitim imajında üç engel çıktı:
     imajda vLLM yok, kurmak torch'u 2.13'e yükseltmek istiyor (Blackwell
     desteği gider), `--no-deps` ile kurulunca ABI uyuşmazlığından import
     çöküyor. Ayrıntı GRPOConfig içindeki notta.
 
     Ölçülen sonuç: vLLM'siz 14,4 sn/adım. Beklediğimizden iyi, çünkü
     üretilen Sigma kuralları kısa (ortalama 191 token, tavan 768).
-    Gerçek çözüm vLLM'i ayrı konteynerde servis edip vllm_mode="server"
-    kullanmak — bu imaja dokunmadan.
+    vLLM ayrı konteynerde çalışıyor (vllm_servis.sh, nvcr.io/nvidia/vllm;
+    üretim hızı 5,6 kat). GRPO'ya bağlamak için TRL'in vllm_mode="server"
+    modu `trl vllm-serve` bekliyor; bu depoda yapılmadı.
 
 KULLANIM
     python odul.py --test                      # ÖNCE bunu koşun
-    python grpo_kos.py --adapter ckpt/sft_1000 --adim 200
+    python grpo_kos.py --adapter ckpt/sft_1000 --adim 150
 """
 import argparse
 import json
@@ -130,11 +131,11 @@ def main():
                     help="SFT adaptörü — GRPO bunun üstüne gelir")
     ap.add_argument("--veri", default=None)
     ap.add_argument("--cikti", default=str(BURASI / "ckpt" / "grpo"))
-    ap.add_argument("--adim", type=int, default=200)
+    ap.add_argument("--adim", type=int, default=150)
     ap.add_argument("--beta", type=float, default=0.02,
                     help="KL cezası. 0 = çıpa yok, biçim sürükleniyor")
     ap.add_argument("--vllm", action="store_true",
-                    help="vLLM kullan — bu imajda ÇALIŞMIYOR, bkz. GRPOConfig notu")
+                    help="vLLM colocate — eğitim imajında ÇALIŞMIYOR, bkz. GRPOConfig notu")
     args = ap.parse_args()
 
     if args.veri is None:
@@ -211,7 +212,7 @@ def main():
         max_steps=args.adim,
         bf16=True,
 
-        # --- vLLM BU CİHAZDA KULLANILAMIYOR (ölçüldü 16.09.2026) -----------
+        # --- vLLM COLOCATE BU İMAJDA KULLANILAMIYOR (ölçüldü 16.09.2026) ---
         # Plan colocate modunda vLLM kullanmaktı; GRPO her adımda 8 cevap
         # ürettiği için üretim hızı işin tamamı. Üç engel çıktı:
         #
@@ -229,9 +230,10 @@ def main():
         #
         # torchao hikâyesiyle aynı ders: çözüm yükseltmek değil, vazgeçmek.
         # Üretim `transformers.generate` ile yapılıyor — yavaş ama çalışıyor.
-        # Gerçek çözüm vLLM'i AYRI bir konteynerde servis edip
-        # vllm_mode="server" kullanmak; kendi torch'uyla yaşar, bu imaja
-        # dokunmaz. Sıradaki iş.
+        # Sonradan: "bu cihazda olmaz" genellemesi yanlıştı. vLLM AYRI
+        # konteynerde (nvcr.io/nvidia/vllm) çalışıyor, bkz. vllm_servis.sh.
+        # GRPO'ya bağlamak vllm_mode="server" + `trl vllm-serve` ister;
+        # sıradaki iş.
         use_vllm=args.vllm,
         **({"vllm_mode": "colocate", "vllm_gpu_memory_utilization": 0.3}
            if args.vllm else {}),

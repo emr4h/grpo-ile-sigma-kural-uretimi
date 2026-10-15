@@ -1,15 +1,27 @@
 # Doğrulanabilir ödül: GRPO ile Sigma kuralı üretimi
 
-Bir dil modeline tespit kuralı yazdırmaya çalıştım. SFT biçimi öğretti ama
-bilgiyi öğretmedi. Model geçerli Sigma kuralları üretiyordu, sadece yanlış
-ATT&CK tekniğini etiketliyordu.
+Küçük bir dil modeline, açıklamasını verdiğim saldırı için Sigma tespit
+kuralı yazdırmayı GRPO ile öğretmeye çalıştım. İlk denemede model hiçbir şey
+öğrenmedi. Sebebi bana GRPO'nun nasıl çalıştığını öğretti; bu depo o yolun
+kodu, ölçümleri ve başarısız denemeleri.
 
-GRPO o boşluğu kapattı: ATT&CK isabeti **0,070'ten 0,194'e** çıktı. Ama
-yolda üç kez başarısız oldu ve her başarısızlık bir öncekinin gizlediği
-sorunu görünür kıldı.
+**Kısaca**
+
+- **Problem:** SFT ile eğittiğim model kuralları kusursuz biçimde yazıyor ama
+  saldırı tekniğini (ATT&CK) yanlış etiketliyordu. Biçimi kopyalamak kolay,
+  doğru tekniği bulmak değil.
+- **İlk deneme çöktü:** "doğru teknik 1, yanlış 0" diye puanladım. 390 teknik
+  arasında model hiç tutturamadı, bütün cevaplar 0 aldı ve GRPO öğrenecek
+  bir fark bulamadı.
+- **Düzelten:** puanı basamaklara bölmek (tam isabet / doğru aile / doğru
+  taktik) ve modeli başlangıç hâline bağlayan küçük bir ceza (KL).
+- **Sonuç:** ATT&CK isabeti **0,070 → 0,194**, çalışan kural **72 → 87 / 100**.
+- **Ders:** ödülün doğrulanabilir olması yetmiyor, modelin ona adım adım
+  ulaşabilmesi gerekiyor.
 
 Her şey NVIDIA DGX Spark üzerinde (GB10, 128 GB) Eylül 2026'da koşturuldu.
-Model Qwen3-0.6B.
+Model Qwen3-0.6B. Ortamın kurulumu ayrı bir depoda:
+[emr4h/dgx-spark-ortam](https://github.com/emr4h/dgx-spark-ortam).
 
 ## Önce: GRPO nedir?
 
@@ -18,7 +30,12 @@ SFT'de modele doğru cevabı gösterirsiniz, o kopyalar.
 GRPO'da doğru cevap **yoktur**. Bir puanlayıcı vardır: model aynı soruya
 sekiz cevap üretir, hepsi puanlanır, model iyi puan alanlara doğru kayar.
 Açılımı Group Relative Policy Optimization; "relative" o sekiz cevabın
-birbirlerine göre sıralanması demek.
+birbirlerine göre sıralanması demek. Ortalamadan iyi olan cevaplar
+güçlendirilir, kötüler zayıflatılır. Kısacası öğretmen yok, sınav var.
+
+Bundan önemli bir sonuç çıkıyor: **GRPO cevaplar arasındaki farktan öğrenir.**
+Sekiz cevabın hepsi aynı puanı alırsa (örneğin hepsi 0) öğrenecek bir şey
+kalmaz. Aşağıdaki ilk başarısız koşu tam olarak bu.
 
 Tek şartı ödülün **hesaplanabilir** olması. Buna doğrulanabilir ödül deniyor.
 
@@ -29,12 +46,12 @@ Bu depoda ölçüldü: eğitimsiz model 100 denemede **0** geçerli kural ürett
 ## Neden Sigma, neden Splunk SPL değil?
 
 İlk plan SPL'di. Ödül fonksiyonunu tasarlarken şu soru çıktı: modelin
-ürettiği sorgunun geçerli olduğunu nasıl anlayacağız?
+ürettiği sorgunun geçerli olduğunu nasıl anlayacağım?
 
 **SPL'in çevrimdışı doğrulayıcısı yok.** Resmi yol, çalışan bir Splunk
 örneğindeki `/services/search/parser` uç noktasına sorguyu göndermek. GRPO
-için bu ölümcül: ödül eğitim boyunca binlerce kez çalışıyor (1.500 prompt ×
-8 üretim = 12.000 çağrı, tek epoch). Her biri ağ üzerinden lisanslı bir
+için bu ölümcül: ödül eğitim boyunca binlerce kez çalışıyor (tam bir epoch
+1.488 prompt × 8 üretim ≈ 12.000 çağrı). Her biri ağ üzerinden lisanslı bir
 sunucuya gidemez. Ödül **hızlı, yerel ve deterministik** olmalı.
 
 Sigma'da bu sorun yok: `pySigma` kuralı yerel olarak doğruluyor.
@@ -49,14 +66,14 @@ Karar ödül tasarımına doğrudan yansıdı. Kesin bileşen sayısı 1'den 3'e
 | logsource örtüşmesi | kısmi | kısmi |
 
 Bedava gelen: `pysigma-backend-splunk` ile Sigma çıktısı SPL'e çevrilebiliyor.
-Birini seçmek zorunda değiliz. Sigma hedef, Splunk türev.
+Birini seçmek zorunda değilim. Sigma hedef, Splunk türev.
 
 ## Veri
 
 [SigmaHQ](https://github.com/SigmaHQ/sigma), Detection Rule License 1.1.
 Kullan, değiştir, yayınla serbest; şart atıf. `NC`/`ND` yok.
 
-Üçlü aynı dosyada duruyor ve tam ihtiyacımız olanı veriyor:
+Üçlü aynı dosyada duruyor ve tam ihtiyacım olanı veriyor:
 
 ```
 description → modele verilecek SORU
@@ -64,7 +81,7 @@ detection   → modelin üreteceği CEVAP
 tags        → cevabı DOĞRULAYACAĞIMIZ ATT&CK kimliği
 ```
 
-Veri üretmiyoruz; soru da cevap da doğrulayıcı da hazır.
+Veri üretmedim; soru da cevap da doğrulayıcı da hazır.
 
 ```
 rules/ altında ayrıştırılan   3.144
@@ -129,7 +146,7 @@ mantiksal  1,326   1,771
 
 **SFT biçimi öğretti, GRPO bilgiyi.** `attack` neredeyse üç katına çıktı.
 Bu, bir önceki paketin bulgusunun devamı: orada SFT'nin ATT&CK kimliklerini
-öğretemediğini ölçmüştük (0,44 → 0,50). Burada onu kimin öğretebileceğini.
+öğretemediğini ölçmüştüm (0,44 → 0,50). Burada onu kimin öğretebileceğini.
 
 ## Üç başarısız GRPO koşusu
 
@@ -153,7 +170,7 @@ de olması gerekiyor.
 
 ### 2. Kademeli ödül gradyanı geri getirdi, erozyonu durdurmadı
 
-ATT&CK zaten hiyerarşik. Ödülü ona göre kademelendirdik:
+ATT&CK zaten hiyerarşik. Ödülü ona göre kademelendirdim:
 
 ```
 t1059.001 = t1059.001   tam isabet      1,0
@@ -195,7 +212,52 @@ Ve eğitim ödülü düz kalmasına rağmen (1,600 → 1,599) test skoru 1,310'd
 ayrı bir set üzerinde. Model eğitim dağılımında tavana yakındı; öğrendiğini
 görünmeyen veriye taşıdı.
 
-## Ortam: dört teknik engel
+## Nasıl tekrarlanır
+
+Ortam: [emr4h/dgx-spark-ortam](https://github.com/emr4h/dgx-spark-ortam)
+konteyneri (torch, transformers, TRL, PEFT, datasets hazır). Üstüne
+`pip install pysigma pysigma-backend-splunk pyyaml`. `veri_sec.py` SigmaHQ'yu
+`git` ile çeker; ağ gerekir.
+
+```bash
+python veri_sec.py                    # SigmaHQ'yu çeker, havuzu kurar
+python odul.py --test                 # ÖDÜLÜ ÖNCE SINA
+python sft_hazirla.py                 # 1000 SFT + 1488 GRPO promptu
+
+python egit_lora.py --veri veri/sft_1000.jsonl --cikti ckpt/sft_1000 --epoch 3
+python test_kos.py --cikti cikti/temel.jsonl                    # taban
+python test_kos.py --adapter ckpt/sft_1000 --cikti cikti/sft.jsonl
+
+python grpo_kos.py --adapter ckpt/sft_1000 --adim 150 --beta 0.02
+python test_kos.py --taban-adapter ckpt/sft_1000 --adapter ckpt/grpo \
+                   --cikti cikti/grpo.jsonl
+
+python kosu_karsilastir.py grpo1.log grpo2.log grpo3.log   # eğim karşılaştırması
+```
+
+Bu depodaki GRPO koşusu üretimi `transformers.generate` ile yaptı (adım
+başına ~14 sn). `vllm_servis.sh` modeli ayrı bir konteynerde OpenAI uyumlu
+uç nokta olarak servis eder; aşağıdaki hız ölçümü o servisle alındı. GRPO
+eğitimine bağlanmadı: TRL'in `vllm_mode="server"` modu ağırlık eşitlemek için
+`trl vllm-serve` bekliyor, düz `vllm serve` yetmiyor. Sıradaki iş bu.
+
+## Dosyalar
+
+| Dosya | Ne işe yarar |
+|---|---|
+| `veri_sec.py` | SigmaHQ'dan havuzu çıkarır, iki eksende dengeli böler |
+| `odul.py` | Dört bileşenli ödül + `--test` ile sınama |
+| `sft_hazirla.py` | SFT ve GRPO veri setlerini kurar (kesişmez) |
+| `egit_lora.py` | LoRA + SFT eğitimi |
+| `grpo_kos.py` | GRPO eğitimi |
+| `test_kos.py` | Test setinde koşturup puanlar |
+| `kosu_karsilastir.py` | Koşuları **eğimle** karşılaştırır, tek noktayla değil |
+| `vllm_servis.sh` | vLLM'i ayrı konteynerde servis eder (üretim hızı ölçümü; GRPO'ya bağlı değil) |
+
+## Yeniden kuracaklar için: dört teknik engel
+
+Sonucu anlamak için bu bölüm gerekmiyor; depoyu kendi makinesinde
+çalıştıracaklar için. Her biri bir kez yolumu kesti.
 
 ### Arrow şema hatası
 
@@ -285,39 +347,6 @@ mitre_attack_technique: "1022"      # Sigma'da tags:
 Test **0,000** verdi, eğitim ödülü 1,6 iken. İmkânsız bir çelişki olduğu
 için yakalandı. Doğru yol eğitimdeki tabanı aynen yeniden kurmak:
 `--taban-adapter ckpt/sft_1000`.
-
-## Nasıl tekrarlanır
-
-```bash
-python veri_sec.py                    # SigmaHQ'yu çeker, havuzu kurar
-python odul.py --test                 # ÖDÜLÜ ÖNCE SINA
-python sft_hazirla.py                 # 1000 SFT + 1488 GRPO promptu
-
-python egit_lora.py --veri veri/sft_1000.jsonl --cikti ckpt/sft_1000 --epoch 3
-python test_kos.py --cikti cikti/temel.jsonl                    # taban
-python test_kos.py --adapter ckpt/sft_1000 --cikti cikti/sft.jsonl
-
-python grpo_kos.py --adapter ckpt/sft_1000 --adim 150 --beta 0.02
-python test_kos.py --taban-adapter ckpt/sft_1000 --adapter ckpt/grpo \
-                   --cikti cikti/grpo.jsonl
-
-python kosu_karsilastir.py grpo1.log grpo2.log grpo3.log   # eğim karşılaştırması
-```
-
-vLLM ile hızlandırmak için `./vllm_servis.sh baslat ckpt/sft_merged`.
-
-## Dosyalar
-
-| Dosya | Ne işe yarar |
-|---|---|
-| `veri_sec.py` | SigmaHQ'dan havuzu çıkarır, iki eksende dengeli böler |
-| `odul.py` | Dört bileşenli ödül + `--test` ile sınama |
-| `sft_hazirla.py` | SFT ve GRPO veri setlerini kurar (kesişmez) |
-| `egit_lora.py` | LoRA + SFT eğitimi |
-| `grpo_kos.py` | GRPO eğitimi |
-| `test_kos.py` | Test setinde koşturup puanlar |
-| `kosu_karsilastir.py` | Koşuları **eğimle** karşılaştırır, tek noktayla değil |
-| `vllm_servis.sh` | vLLM'i ayrı konteynerde servis eder |
 
 ## Sınırlar
 

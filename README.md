@@ -16,8 +16,9 @@ kodu, ölçümleri ve başarısız denemeleri.
 - **Düzelten:** puanı basamaklara bölmek (tam isabet / doğru aile / doğru
   taktik) ve modeli başlangıç hâline bağlayan küçük bir ceza (KL).
 - **Sonuç:** ATT&CK isabeti **0,070 → 0,194**, çalışan kural **72 → 87 / 100**.
-- **Ders:** ödülün doğrulanabilir olması yetmiyor, modelin ona adım adım
-  ulaşabilmesi gerekiyor.
+- **Ders:** modeli yalnız tam doğru cevapla ödüllendirirseniz, o cevabı hiç
+  tutturamadığı sürece hiçbir şey öğrenmez. Doğruya yaklaşan cevaba da puan
+  vermek gerekiyor.
 
 Her şey NVIDIA DGX Spark üzerinde (GB10, 128 GB) Eylül 2026'da koşturuldu.
 Model Qwen3-0.6B. Ortamın kurulumu ayrı bir depoda:
